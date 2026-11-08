@@ -37,6 +37,7 @@ jobs:
         run: |
           python -m unittest -v \
             server.tests.test_gateway_memory_fastpath \
+            server.tests.test_request_log_retention_opt_in \
             server.tests.test_bench_gateway_sse \
             server.tests.test_gateway_body_limit \
             server.tests.test_responses_api \
