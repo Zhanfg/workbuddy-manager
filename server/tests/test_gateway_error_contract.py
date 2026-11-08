@@ -285,8 +285,14 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
                 for rt in _app.routes
                 if getattr(rt, 'path', '').startswith(('/v1/', '/v2/'))
             ]
+            _all = [
+                (getattr(rt, 'path', '<none>'),
+                 sorted(getattr(rt, 'methods', ()) or ()))
+                for rt in _app.routes
+            ]
             self.fail(f'GET chat expected 405, got {r.status_code}; '
-                      f'body={r.text[:180]!r}; API routes={_routes!r}')
+                      f'body={r.text[:180]!r}; API routes={_routes!r}; '
+                      f'route_count={len(_all)}; route_paths={_all[:100]!r}')
         self.assertEqual(r.status_code, 405)
         self.assertIn('application/json', r.headers.get('content-type', ''))
         self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
