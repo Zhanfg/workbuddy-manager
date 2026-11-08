@@ -7,9 +7,9 @@
 | 服务 | MemoryHigh | MemoryMax | MemorySwapMax |
 |---|---:|---:|---:|
 | Manager | 224 MiB | 320 MiB | 128 MiB |
-| wb2api | 128 MiB | 192 MiB | 64 MiB |
+| wb2api | 160 MiB | 192 MiB | 64 MiB |
 | cloudflared | 40 MiB | 64 MiB | 32 MiB |
-| 合计 | 392 MiB | 576 MiB | 224 MiB |
+| 合计 | 424 MiB | 576 MiB | 224 MiB |
 
 这是初始硬上限和压力门槛，不是实测 RSS。Minecraft 的 Java 堆可能达到 1024 MiB，还需额外 native、线程栈和操作系统空间，Chromium 又可能消耗约 640 MiB。2 GiB 内存无法保证三者全峰值共存而不 OOM。资源上限能减少网关挤占 Minecraft 的风险，却不能取代按需关闭 Chromium。OOMScoreAdjust 提高网关被系统优先回收的概率，不是绝对保障。
 
@@ -78,7 +78,7 @@ manager.db、users.json、wb2api config.json、auths/、data/state.json 都属�
 
    如果 Manager 的实际 unit 是 workbuddy-manager，替换对应参数。针对 Minecraft/Chromium 多进程，请重点看 systemd MemoryCurrent 和 cgroup oom_kill，而不仅是 MainPID 的 RSS。当前实测的 Manager 和 Go 空闲进程数据只来自无凭据的 CI 隔离环境，不代表生产账号池的整体占用。
 
-2. Go drop-in 另提供 GOMEMLIMIT=144MiB。它是 Go runtime 的**软内存目标**，并非 RSS 硬上限。不能从这个值推断工作集上限；Go 的堆外、网络缓冲与服务其他资源仍可能使实际 RSS 更高。先测纯转发每流 token/s、CPU、延迟和 1M 上下文；若 GC 过于频繁导致延迟退化，可仅去掉该环境变量而保持其它 systemd 资源规则。
+2. Go drop-in 另提供 GOMEMLIMIT=128MiB。它是 Go runtime 的**软内存目标**，并非 RSS 硬上限。不能从这个值推断工作集上限；Go 的堆外、网络缓冲与服务其他资源仍可能使实际 RSS 更高。先测纯转发每流 token/s、CPU、延迟和 1M 上下文；若 GC 过于频繁导致延迟退化，可仅去掉该环境变量而保持其它 systemd 资源规则。
 
 3. Manager drop-in 提供 MALLOC_ARENA_MAX=2，目标是降低大请求结束后的 glibc malloc arena 碎片保留，不保证影响 CPython 自己的全部小对象分配。对冷启动 RSS 可能没有可见影响。
 
