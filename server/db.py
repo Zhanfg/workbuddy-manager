@@ -1268,7 +1268,21 @@ _ip_log_writes = 0
 # 注意与 `rebuild_usage_from_logs` 的关系：重建以 request_logs 为唯一依据，
 # 删掉 90 天前的日志后，那段时期的用量统计**不能再重建**（现有数据不受影响，
 # 只是无法重算）。这是刻意的：90 天前的用量早已定稿，不值得为它永久保留明细。
-_REQUEST_LOG_RETAIN_DAYS = 90
+def _request_log_retention_days(value: str | None) -> int:
+    """仅允许显式的 7–365 天保留期；错误配置回退 90 天，避免误删历史。
+
+    usage_daily 的累计额度不受明细保留期影响，但历史重建能力会缩短。
+    """
+    try:
+        days = int(value) if value is not None else 90
+    except (TypeError, ValueError, OverflowError):
+        return 90
+    return days if 7 <= days <= 365 else 90
+
+
+_REQUEST_LOG_RETAIN_DAYS = _request_log_retention_days(
+    os.environ.get('WB_REQUEST_LOG_RETAIN_DAYS'),
+)
 
 # 清理间隔：按行数触发（每 2000 次写入检查一次），与 ip 日志同款思路——
 # 不必每次写入都查一次。检查本身用索引列 ts，成本可忽略。
