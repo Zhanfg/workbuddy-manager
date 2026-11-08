@@ -49,6 +49,9 @@ jobs:
       - name: Synthetic 340-frame SSE parser CPU benchmark
         run: python tools/bench_sse_parser.py --frames 340 --loops 300
 
+      - name: Validate shell resource sampler
+        run: sh -n tools/check_host_resources.sh
+
       - name: Compile all Python backend modules
         run: |
           python -m compileall -q server
