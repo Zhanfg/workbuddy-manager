@@ -268,7 +268,16 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
 
     # ── 路由形状 ─────────────────────────────────────────
     def test_get_chat_returns_json_not_spa_html(self) -> None:
+        # POST route exists: under current Starlette, GET is correctly 405.
+        # What matters to API consumers is an OpenAI-shaped JSON error,
+        # never the Next.js SPA HTML fallback.
         r = self.c.get('/v1/chat/completions')
+        self.assertEqual(r.status_code, 405)
+        self.assertIn('application/json', r.headers.get('content-type', ''))
+        self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
+
+    def test_unknown_v1_path_is_json_404_not_spa_html(self) -> None:
+        r = self.c.get('/v1/there-is-no-such-route')
         self.assertEqual(r.status_code, 404)
         self.assertIn('application/json', r.headers.get('content-type', ''))
         self.assertEqual(r.json()['error']['code'], 'not_found')
