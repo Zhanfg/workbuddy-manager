@@ -14,3 +14,8 @@ pydantic>=2.7.0
 # （容器 / systemd / Windows 原生）不保证有。用不到这个功能的部署不受影响：
 # 驱动是**按需导入**的，没装也能正常启动，只是备份页会提示去装。
 psycopg[binary]>=3.1
+
+# 生产 CF Access JWT / JWKS 签名校验依赖：cfaccess.py 是生产本地补丁，
+# 必须先与本 Fork 的当前基线合并；仅安装依赖不代表自动登录已可用。
+# crypto extra 会拉取 cryptography；该功能在非 CF Access 环境不会主动调用。
+PyJWT[crypto]>=2.10.1,<3
