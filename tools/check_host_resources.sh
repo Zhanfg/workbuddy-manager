@@ -8,7 +8,7 @@ set -u
 if [ "$#" -eq 0 ]; then
     if command -v systemctl >/dev/null 2>&1; then
         units=$(systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null |
-            awk '$1 ~ /^(workbuddy|wb2api|cloudflared|minecraft).*\\.service$/ { print $1 }')
+            awk '$1 ~ /^(workbuddy|wb2api|cloudflared|minecraft)/ && $1 ~ /[.]service$/ { print $1 }')
         if [ -n "$units" ]; then
             # Unit names below are validated before they reach systemctl.
             set -f
@@ -19,7 +19,7 @@ if [ "$#" -eq 0 ]; then
 fi
 
 if [ "$#" -eq 0 ]; then
-    printf '%s\\n' 'No known service units detected; pass your actual unit names explicitly.'
+    printf '%s\n' 'No known service units detected; pass your actual unit names explicitly.'
 fi
 
 printf '%s\n' '=== Host memory (kB) ==='
