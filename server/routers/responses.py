@@ -1226,11 +1226,11 @@ class _StreamTranslator:
 
         self.reason_index: int | None = None
         self.reason_id = ''
-        self.reason_buf = ''
+        self.reason_parts: list[str] = []
 
         self.text_index: int | None = None
         self.text_id = ''
-        self.text_buf = ''
+        self.text_parts: list[str] = []
 
         # 上游工具序号 → 输出项（上游可能并发给多个工具，各自编号）
         self.tools: dict[int, dict] = {}
@@ -1270,7 +1270,7 @@ class _StreamTranslator:
         })]
 
     def _open_reason(self) -> list[bytes]:
-        self.reason_buf = ''
+        self.reason_parts = []
         self.reason_index = self.next_index
         self.next_index += 1
         self.reason_id = 'rs_' + uuid.uuid4().hex[:20]
@@ -1292,7 +1292,8 @@ class _StreamTranslator:
         # 凭据 `encrypted_content` 只能在这里补上——它要等推理全文到齐才能算出。
         # 客户端在 `output_item.done` 上取这个字段（issue #36：此前从没发过，
         # 于是客户端拿不到凭据，下一轮不带推理痕迹，上游报 11155）。
-        item = _reasoning_item(self.reason_buf, self.reason_id)
+        item = _reasoning_item(''.join(self.reason_parts), self.reason_id)
+        self.reason_parts.clear()
         self._record_item(index, item)
         return [_event('response.output_item.done', {
             'type': 'response.output_item.done',
@@ -1301,7 +1302,7 @@ class _StreamTranslator:
         })]
 
     def _open_text(self) -> list[bytes]:
-        self.text_buf = ''
+        self.text_parts = []
         self.text_index = self.next_index
         self.next_index += 1
         self.text_id = 'msg_' + uuid.uuid4().hex[:20]
@@ -1332,8 +1333,11 @@ class _StreamTranslator:
         if self.text_index is None:
             return []
         index, self.text_index = self.text_index, None
-        part = {'type': 'output_text', 'text': self.text_buf, 'annotations': []}
-        item = _message_item(self.text_buf, self.text_id, phase)
+        # 将增量文本只在输出项关闭时拼接一次，避免每个 token 的重复复制。
+        complete_text = ''.join(self.text_parts)
+        self.text_parts.clear()
+        part = {'type': 'output_text', 'text': complete_text, 'annotations': []}
+        item = _message_item(complete_text, self.text_id, phase)
         self._record_item(index, item)
         return [
             _event('response.output_text.done', {
@@ -1341,7 +1345,7 @@ class _StreamTranslator:
                 'output_index': index,
                 'content_index': 0,
                 'item_id': self.text_id,
-                'text': self.text_buf,
+                'text': complete_text,
             }),
             _event('response.content_part.done', {
                 'type': 'response.content_part.done',
@@ -1489,7 +1493,7 @@ class _StreamTranslator:
             if self.reason_index is None:
                 out += self._close_text()
                 out += self._open_reason()
-            self.reason_buf += reasoning
+            self.reason_parts.append(reasoning)
             out.append(_event('response.reasoning_summary_text.delta', {
                 'type': 'response.reasoning_summary_text.delta',
                 'output_index': self.reason_index,
@@ -1508,7 +1512,7 @@ class _StreamTranslator:
                 out += self._close_reason()
             if self.text_index is None:
                 out += self._open_text()
-            self.text_buf += text
+            self.text_parts.append(text)
             out.append(_event('response.output_text.delta', {
                 'type': 'response.output_text.delta',
                 'output_index': self.text_index,
