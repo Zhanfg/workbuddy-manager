@@ -521,13 +521,17 @@ if config.STATIC_DIR.is_dir():
             # web/out is absent. Restore the method contract based on the
             # actual API routes registered above the static fallback.
             allowed_methods: set[str] = set()
-            for route in app.routes:
-                route_path = getattr(route, 'path', '')
-                if not route_path.startswith(('/v1/', '/v2/')):
-                    continue
-                match, _ = route.matches(request.scope)
-                if match == Match.PARTIAL:
-                    allowed_methods.update(getattr(route, 'methods', ()) or ())
+            # FastAPI versions differ in how include_router populates
+            # app.routes: newer versions can expose route wrappers without
+            # .path/.methods. The source APIRouters are stable across both
+            # layouts, so inspect them instead of relying on app internals.
+            for api_router in (gateway.router, responses.router, anthropic.router):
+                for route in api_router.routes:
+                    if not getattr(route, 'path', '').startswith(('/v1/', '/v2/')):
+                        continue
+                    match, _ = route.matches(request.scope)
+                    if match == Match.PARTIAL:
+                        allowed_methods.update(getattr(route, 'methods', ()) or ())
             if allowed_methods:
                 return JSONResponse({
                     'error': {
