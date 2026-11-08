@@ -276,6 +276,18 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
         self.assertIn('application/json', r.headers.get('content-type', ''))
         self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
 
+    def test_all_post_only_gateway_paths_return_json_405_with_static(self) -> None:
+        # No login or model call is needed to verify HTTP method dispatch.
+        # Before the fix, the SPA GET catch-all changed these from 405 to 404.
+        for path in ('/v1/chat/completions', '/v2/chat/completions',
+                     '/v1/responses', '/v1/messages'):
+            with self.subTest(path=path):
+                r = self.c.get(path)
+                self.assertEqual(r.status_code, 405)
+                self.assertIn('application/json', r.headers.get('content-type', ''))
+                self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
+                self.assertIn('POST', r.headers.get('allow', ''))
+
     def test_unknown_v1_path_is_json_404_not_spa_html(self) -> None:
         r = self.c.get('/v1/there-is-no-such-route')
         self.assertEqual(r.status_code, 404)
