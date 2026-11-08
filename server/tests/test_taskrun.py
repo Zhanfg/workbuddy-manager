@@ -546,6 +546,10 @@ class EventLoopResponsivenessTest(unittest.TestCase):
                     await asyncio.sleep(0.05)
 
             hb = asyncio.create_task(beat())
+            # Yield once so the heartbeat actually starts before measuring.
+            # Without this, a no-op coroutine can finish in the same loop turn
+            # and report zero ticks even though the event loop is healthy.
+            await asyncio.sleep(0)
             with mock.patch('subprocess.run', side_effect=self._slow_docker(delay)):
                 await coro_factory()
             stop.set()

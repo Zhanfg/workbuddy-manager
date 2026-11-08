@@ -268,7 +268,49 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
 
     # ── 路由形状 ─────────────────────────────────────────
     def test_get_chat_returns_json_not_spa_html(self) -> None:
+        # POST route exists: under current Starlette, GET is correctly 405.
+        # What matters to API consumers is an OpenAI-shaped JSON error,
+        # never the Next.js SPA HTML fallback.
         r = self.c.get('/v1/chat/completions')
+        if r.status_code != 405:
+            from server.main import app as _app
+            # Inspect the app's real registered routes on failure. This
+            # diagnostic contains no client token, request body or secrets.
+            _scope = {'type': 'http', 'path': '/v1/chat/completions',
+                      'root_path': '', 'method': 'GET', 'headers': [],
+                      'query_string': b''}
+            _routes = [
+                (getattr(rt, 'path', ''), str(rt.matches(_scope)[0]),
+                 sorted(getattr(rt, 'methods', ()) or ()))
+                for rt in _app.routes
+                if getattr(rt, 'path', '').startswith(('/v1/', '/v2/'))
+            ]
+            _all = [
+                (getattr(rt, 'path', '<none>'),
+                 sorted(getattr(rt, 'methods', ()) or ()))
+                for rt in _app.routes
+            ]
+            self.fail(f'GET chat expected 405, got {r.status_code}; '
+                      f'body={r.text[:180]!r}; API routes={_routes!r}; '
+                      f'route_count={len(_all)}; route_paths={_all[:100]!r}')
+        self.assertEqual(r.status_code, 405)
+        self.assertIn('application/json', r.headers.get('content-type', ''))
+        self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
+
+    def test_all_post_only_gateway_paths_return_json_405_with_static(self) -> None:
+        # No login or model call is needed to verify HTTP method dispatch.
+        # Before the fix, the SPA GET catch-all changed these from 405 to 404.
+        for path in ('/v1/chat/completions', '/v2/chat/completions',
+                     '/v1/responses', '/v1/messages'):
+            with self.subTest(path=path):
+                r = self.c.get(path)
+                self.assertEqual(r.status_code, 405)
+                self.assertIn('application/json', r.headers.get('content-type', ''))
+                self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
+                self.assertIn('POST', r.headers.get('allow', ''))
+
+    def test_unknown_v1_path_is_json_404_not_spa_html(self) -> None:
+        r = self.c.get('/v1/there-is-no-such-route')
         self.assertEqual(r.status_code, 404)
         self.assertIn('application/json', r.headers.get('content-type', ''))
         self.assertEqual(r.json()['error']['code'], 'not_found')

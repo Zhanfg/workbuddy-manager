@@ -1,0 +1,41 @@
+name: Idle memory baseline (production base vs optimization)
+
+on:
+  push:
+    branches:
+      - optimize/memory-sse-throughput-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  idle-memory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install backend requirements
+        run: python -m pip install -r server/requirements.txt
+
+      - name: Fetch exact v2.11.10 production code baseline
+        run: |
+          git fetch --no-tags --depth=1 origin refs/heads/baseline/production-v2.11.10
+          git worktree add --detach "$RUNNER_TEMP/wb-manager-base" FETCH_HEAD
+
+      - name: Measure original production commit
+        run: python tools/bench_idle_memory.py --root "$RUNNER_TEMP/wb-manager-base" --seconds 8
+
+      - name: Measure optimized candidate
+        run: python tools/bench_idle_memory.py --root "$GITHUB_WORKSPACE" --seconds 8

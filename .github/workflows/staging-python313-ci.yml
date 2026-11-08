@@ -1,0 +1,45 @@
+name: Staging Debian 13 Python 3.13 regressions
+
+on:
+  push:
+    branches:
+      - optimize/memory-sse-throughput-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  staging-python313:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Create in-tree venv to reproduce VPS staging artifact
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check -r server/requirements.txt
+
+      - name: Full Manager regression suite in Python 3.13 venv
+        run: .venv/bin/python -m unittest discover -s server/tests -t .
+
+      - name: Verify CF Access crypto dependencies import
+        run: .venv/bin/python -c "import jwt, cryptography; from jwt.algorithms import RSAAlgorithm"
+
+      - name: Recheck previously failing contracts under root plus venv
+        run: |
+          sudo -n "$GITHUB_WORKSPACE/.venv/bin/python" -m unittest \
+            server.tests.test_gateway_error_contract.GatewayErrorContractHTTPTest.test_get_chat_returns_json_not_spa_html \
+            server.tests.test_gateway_error_contract.GatewayErrorContractHTTPTest.test_unknown_v1_path_is_json_404_not_spa_html \
+            server.tests.test_update_e2e.UpdateEndToEndTest.test_failed_dependency_install_aborts_without_touching_install \
+            server.tests.test_update_e2e.UpdateEndToEndTest.test_pip_uses_user_install_when_system_site_readonly \
+            server.tests.test_update_e2e.UpdateEndToEndTest.test_pip_falls_back_to_user_on_permission_error \
+            server.tests.test_windows_scripts.GitAttributesTest.test_ps1_files_have_utf8_bom
+

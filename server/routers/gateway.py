@@ -256,19 +256,21 @@ async def _read_json_body(request: Request) -> tuple[dict | None, JSONResponse |
     if declared > limit:
         return None, _payload_too_large(limit)
 
-    chunks: list[bytes] = []
+    # 使用单一可增长缓冲，避免 chunks 列表及最终 b''.join 产生第二份完整请求体。
+    # json.loads 接受 bytearray；仍需完整解析 JSON 才能校验 Key、模型和改写请求。
+    raw = bytearray()
     size = 0
     try:
         async for chunk in request.stream():
             size += len(chunk)
             if size > limit:
                 return None, _payload_too_large(limit)
-            chunks.append(chunk)
+            raw.extend(chunk)
     except Exception:  # noqa: BLE001
         return None, _oai_error('读取请求体失败', 400)
 
     try:
-        body = json.loads(b''.join(chunks))
+        body = json.loads(raw)
     except Exception:  # noqa: BLE001
         return None, _oai_error('请求体不是合法 JSON', 400)
     if not isinstance(body, dict):
@@ -874,7 +876,7 @@ def _upstream_for(key: dict | None, *, ip: str, model: str, mapped: str,
         return None, _oai_error(str(exc), 503, 'api_error', 'upstream_unavailable')
 
 
-def _scan_sse(pending: str, usage: dict) -> tuple[str, bool]:
+def _scan_sse(pending: str, usage: dict, *, check_content: bool = True) -> tuple[str, bool]:
     """扫描 SSE 文本片段：提取 usage，并判断是否已出现首个正文。
 
     返回 (未处理完的残留缓冲, 本次是否见到正文 delta)。
@@ -882,13 +884,19 @@ def _scan_sse(pending: str, usage: dict) -> tuple[str, bool]:
     若用「收到首块」当首字，会把连接建立时间也算进去，数字偏小且失真。
     """
     saw_content = False
-    while '\n' in pending:
-        line, pending = pending.split('\n', 1)
+    # 单次切分一次完整缓冲，避免聚合网络分片时逐行 split 的重复复制。
+    lines = pending.split('\n')
+    pending = lines.pop()
+    for line in lines:
         line = line.strip()
         if not line.startswith('data:'):
             continue
         payload = line[5:].strip()
         if not payload or payload == '[DONE]':
+            continue
+        # 首个正文 delta 已定位后，只需继续读末帧 usage。
+        # 绝大多数 token delta 不含 usage，避免每秒数百次无意义 JSON 反序列化。
+        if not check_content and '"usage"' not in payload:
             continue
         try:
             obj = json.loads(payload)
@@ -898,7 +906,7 @@ def _scan_sse(pending: str, usage: dict) -> tuple[str, bool]:
             continue
         if isinstance(obj.get('usage'), dict):
             usage.update(obj['usage'])
-        choices = obj.get('choices')
+        choices = obj.get('choices') if check_content else None
         if isinstance(choices, list):
             for choice in choices:
                 if not isinstance(choice, dict):
@@ -1438,7 +1446,9 @@ async def _chat(request: Request, upstream_path: str):
                     yield chunk
                     continue
                 pending += chunk.decode('utf-8', errors='ignore')
-                pending, saw_content = _scan_sse(pending, usage)
+                pending, saw_content = _scan_sse(
+                    pending, usage, check_content=first_token_ms is None,
+                )
                 if saw_content and first_token_ms is None:
                     first_token_ms = int((time.time() - started) * 1000)
                 yield chunk

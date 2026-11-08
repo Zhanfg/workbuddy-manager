@@ -295,6 +295,9 @@ class UpdateEndToEndTest(unittest.TestCase):
 
         def update_with_failing_pip(rep):
             mod.run = fake_run
+            # This scenario exercises system Python/PEP 668, not the venv
+            # currently executing unittest (e.g. root VPS staging).
+            mod._in_venv = lambda: False
             return orig_update(rep)
 
         mod.update_manager = update_with_failing_pip
@@ -337,6 +340,7 @@ class UpdateEndToEndTest(unittest.TestCase):
 
         def update_with_fake_pip(rep):
             mod.run = fake_run
+            mod._in_venv = lambda: False
             mod._system_site_writable = lambda: writable
             return orig_update(rep)
 

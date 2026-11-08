@@ -1,0 +1,58 @@
+name: Gateway memory and SSE regression
+
+on:
+  push:
+    branches:
+      - optimize/memory-sse-throughput-v1
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/gateway-perf-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: server/requirements.txt
+
+      - name: Install backend requirements
+        run: python -m pip install -r server/requirements.txt
+
+      - name: Test streaming, body limits, accounting and HTTPX pooling
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python -m unittest -v \
+            server.tests.test_gateway_memory_fastpath \
+            server.tests.test_request_log_retention_opt_in \
+            server.tests.test_bench_gateway_sse \
+            server.tests.test_gateway_body_limit \
+            server.tests.test_responses_api \
+            server.tests.test_http_client_pool \
+            server.tests.test_idle_http_pool \
+            server.tests.test_key_usage \
+            server.tests.test_stream_error_logging
+
+      - name: Synthetic 340-frame SSE parser CPU benchmark
+        run: python tools/bench_sse_parser.py --frames 340 --loops 300
+
+      - name: Validate shell resource sampler
+        run: sh -n tools/check_host_resources.sh
+
+      - name: Compile all Python backend modules
+        run: |
+          python -m compileall -q server
+          python -m py_compile tools/bench_gateway_sse.py tools/bench_sse_parser.py
