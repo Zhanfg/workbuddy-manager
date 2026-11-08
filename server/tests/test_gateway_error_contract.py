@@ -272,7 +272,8 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
         # What matters to API consumers is an OpenAI-shaped JSON error,
         # never the Next.js SPA HTML fallback.
         r = self.c.get('/v1/chat/completions')
-        self.assertEqual(r.status_code, 405)
+        self.assertEqual(r.status_code, 405,
+                         f'GET chat error body: {r.text[:300]!r}; headers={dict(r.headers)!r}')
         self.assertIn('application/json', r.headers.get('content-type', ''))
         self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
 
