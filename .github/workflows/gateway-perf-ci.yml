@@ -41,6 +41,7 @@ jobs:
             server.tests.test_gateway_body_limit \
             server.tests.test_responses_api \
             server.tests.test_http_client_pool \
+            server.tests.test_idle_http_pool \
             server.tests.test_key_usage \
             server.tests.test_stream_error_logging
 
