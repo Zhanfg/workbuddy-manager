@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as _StarletteHTTPException
+from starlette.routing import Match
 
 import json
 import logging
@@ -515,6 +516,26 @@ if config.STATIC_DIR.is_dir():
         # 网关路径绝不该落到 SPA 外壳：宁可回一条 JSON 404，也不要把首页 HTML
         # 当成接口响应发给客户端。
         if full_path.startswith(('v1/', 'v2/')):
+            # SPA has a GET catch-all. Without this guard, GET on an existing
+            # POST-only API endpoint is 404 if web/out exists, but 405 when
+            # web/out is absent. Restore the method contract based on the
+            # actual API routes registered above the static fallback.
+            allowed_methods: set[str] = set()
+            for route in app.routes:
+                route_path = getattr(route, 'path', '')
+                if not route_path.startswith(('/v1/', '/v2/')):
+                    continue
+                match, _ = route.matches(request.scope)
+                if match == Match.PARTIAL:
+                    allowed_methods.update(getattr(route, 'methods', ()) or ())
+            if allowed_methods:
+                return JSONResponse({
+                    'error': {
+                        'message': 'Method Not Allowed',
+                        'type': 'invalid_request_error',
+                        'code': 'method_not_allowed',
+                    },
+                }, status_code=405, headers={'Allow': ', '.join(sorted(allowed_methods))})
             return JSONResponse({'error': {'message': f'未知的接口路径 /{full_path}',
                                            'type': 'invalid_request_error',
                                            'code': 'not_found'}}, status_code=404)
