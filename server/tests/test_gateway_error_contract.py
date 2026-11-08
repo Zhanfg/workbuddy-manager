@@ -272,8 +272,22 @@ class GatewayErrorContractHTTPTest(unittest.TestCase):
         # What matters to API consumers is an OpenAI-shaped JSON error,
         # never the Next.js SPA HTML fallback.
         r = self.c.get('/v1/chat/completions')
-        self.assertEqual(r.status_code, 405,
-                         f'GET chat error body: {r.text[:300]!r}; headers={dict(r.headers)!r}')
+        if r.status_code != 405:
+            from server.main import app as _app
+            # Inspect the app's real registered routes on failure. This
+            # diagnostic contains no client token, request body or secrets.
+            _scope = {'type': 'http', 'path': '/v1/chat/completions',
+                      'root_path': '', 'method': 'GET', 'headers': [],
+                      'query_string': b''}
+            _routes = [
+                (getattr(rt, 'path', ''), str(rt.matches(_scope)[0]),
+                 sorted(getattr(rt, 'methods', ()) or ()))
+                for rt in _app.routes
+                if getattr(rt, 'path', '').startswith(('/v1/', '/v2/'))
+            ]
+            self.fail(f'GET chat expected 405, got {r.status_code}; '
+                      f'body={r.text[:180]!r}; API routes={_routes!r}')
+        self.assertEqual(r.status_code, 405)
         self.assertIn('application/json', r.headers.get('content-type', ''))
         self.assertEqual(r.json()['error']['code'], 'method_not_allowed')
 
