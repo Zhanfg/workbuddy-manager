@@ -7,7 +7,12 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import time
+from pathlib import Path
+
+# 直接运行 tools/*.py 时，确保从仓库根目录导入 server。
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server.routers.gateway import _scan_sse
 
