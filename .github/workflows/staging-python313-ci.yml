@@ -38,4 +38,4 @@ jobs:
             server.tests.test_update_e2e.UpdateEndToEndTest.test_failed_dependency_install_aborts_without_touching_install \
             server.tests.test_update_e2e.UpdateEndToEndTest.test_pip_uses_user_install_when_system_site_readonly \
             server.tests.test_update_e2e.UpdateEndToEndTest.test_pip_falls_back_to_user_on_permission_error \
-            server.tests.test_windows_scripts.WindowsScriptTest.test_ps1_files_have_utf8_bom
+            server.tests.test_windows_scripts.GitAttributesTest.test_ps1_files_have_utf8_bom
