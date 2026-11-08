@@ -1,18 +1,38 @@
 #!/bin/sh
 # Inspect combined resource pressure without reading logs, env files or argv.
 # Usage: sh tools/check_host_resources.sh [systemd unit names...]
-# Default names are examples; override with your actual units.
+# With no arguments, discover WorkBuddy, Tunnel and Minecraft unit names.
+# Explicit arguments always win and permit custom names.
 set -u
 
 if [ "$#" -eq 0 ]; then
-    set -- workbuddy-web workbuddy2api cloudflared minecraft
+    if command -v systemctl >/dev/null 2>&1; then
+        units=$(systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null |
+            awk '$1 ~ /^(workbuddy|wb2api|cloudflared|minecraft).*\\.service$/ { print $1 }')
+        if [ -n "$units" ]; then
+            # Unit names below are validated before they reach systemctl.
+            set -f
+            set -- $units
+            set +f
+        fi
+    fi
+fi
+
+if [ "$#" -eq 0 ]; then
+    printf '%s\\n' 'No known service units detected; pass your actual unit names explicitly.'
 fi
 
 printf '%s\n' '=== Host memory (kB) ==='
 awk '/^(MemTotal|MemAvailable|SwapTotal|SwapFree|Committed_AS):/ { print }' /proc/meminfo 2>/dev/null
 printf '%s\n' '=== Memory PSI ==='
+psi=''
 if [ -r /proc/pressure/memory ]; then
-    cat /proc/pressure/memory
+    psi=$(cat /proc/pressure/memory 2>/dev/null) || psi=''
+fi
+if [ -n "$psi" ]; then
+    printf '%s\n' "$psi"
+else
+    printf '%s\n' 'PSI unavailable or empty on this host'
 fi
 
 for unit in "$@"; do
