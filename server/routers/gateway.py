@@ -884,8 +884,10 @@ def _scan_sse(pending: str, usage: dict, *, check_content: bool = True) -> tuple
     若用「收到首块」当首字，会把连接建立时间也算进去，数字偏小且失真。
     """
     saw_content = False
-    while '\n' in pending:
-        line, pending = pending.split('\n', 1)
+    # 单次切分一次完整缓冲，避免聚合网络分片时逐行 split 的重复复制。
+    lines = pending.split('\n')
+    pending = lines.pop()
+    for line in lines:
         line = line.strip()
         if not line.startswith('data:'):
             continue
