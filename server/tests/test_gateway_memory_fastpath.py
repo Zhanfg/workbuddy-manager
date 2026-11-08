@@ -48,13 +48,13 @@ class GatewayMemoryFastpathTest(unittest.TestCase):
 
     def test_stream_after_first_text_only_parses_usage_frames(self):
         usage = {}
-        event = 'data: {"choices":[{"delta":{"content":"A"}}]}\\n'
+        event = 'data: {"choices":[{"delta":{"content":"A"}}]}\n'
         pending, found = gateway._scan_sse(event, usage)
         self.assertTrue(found)
         self.assertEqual(pending, '')
 
-        delta = 'data: {"choices":[{"delta":{"content":"B"}}]}\\n'
-        final = 'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34}}\\n'
+        delta = 'data: {"choices":[{"delta":{"content":"B"}}]}\n'
+        final = 'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34}}\n'
         decoder = json.loads
         with mock.patch.object(gateway.json, 'loads', wraps=decoder) as patched:
             rest, found = gateway._scan_sse(
@@ -68,8 +68,8 @@ class GatewayMemoryFastpathTest(unittest.TestCase):
 
     def test_first_text_detection_unchanged(self):
         pending, found = gateway._scan_sse(
-            'data: {"choices":[{"delta":{"role":"assistant"}}]}\\n'
-            'data: {"choices":[{"delta":{"content":"hello"}}]}\\n', {},
+            'data: {"choices":[{"delta":{"role":"assistant"}}]}\n'
+            'data: {"choices":[{"delta":{"content":"hello"}}]}\n', {},
         )
         self.assertEqual(pending, '')
         self.assertTrue(found)
