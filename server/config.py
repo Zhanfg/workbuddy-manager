@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import time
+import weakref
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -519,6 +520,24 @@ def new_secret() -> str:
 # `modelcatalog.fetch_ids_blocking`）。不同循环各建一个，互不干扰。
 _CLIENTS: dict[tuple, tuple] = {}
 _CLIENTS_MAX = 24
+# 对象被借出时不得淘汰：在途 SSE 会保持该借用直到 Response 关闭。
+# WeakKeyDictionary 不会让已经从连接池移除的 httpx 客户端继续常驻。
+_CLIENT_ACTIVITY = weakref.WeakKeyDictionary()
+_CLIENT_SWEEPERS: dict[asyncio.AbstractEventLoop, asyncio.Task] = {}
+_CLIENT_IDLE_SECONDS = max(15, _env_int('WB_HTTP_CLIENT_IDLE_SECONDS', 90))
+_CLIENT_SWEEP_INTERVAL = min(30, _CLIENT_IDLE_SECONDS)
+
+
+def _activity(client) -> list:  # noqa: ANN001
+    return _CLIENT_ACTIVITY.setdefault(client, [0, time.monotonic()])
+
+
+def _release_client(client) -> None:  # noqa: ANN001
+    state = _CLIENT_ACTIVITY.get(client)
+    if state:
+        state[0] = max(0, state[0] - 1)
+        state[1] = time.monotonic()
+
 
 
 class _BorrowedClient:
@@ -536,10 +555,21 @@ class _BorrowedClient:
     淘汰与退出清理里。
     """
 
-    __slots__ = ('_client',)
+    __slots__ = ('_client', '_borrowed')
 
     def __init__(self, client) -> None:  # noqa: ANN001
         self._client = client
+        self._borrowed = True
+        _activity(client)[0] += 1
+
+    def _release(self) -> None:
+        if self._borrowed:
+            self._borrowed = False
+            _release_client(self._client)
+
+    def __del__(self) -> None:
+        # 遗失的引用不能永久锁定连接池。正常路径仍通过 __aexit__/aclose 归还。
+        self._release()
 
     def __getattr__(self, name: str):  # noqa: ANN201
         # 借用包装要能当客户端用（post/stream/headers/... 一律转发）
@@ -549,11 +579,12 @@ class _BorrowedClient:
         return self._client
 
     async def __aexit__(self, *exc: object) -> bool:
+        self._release()
         return False
 
     async def aclose(self) -> None:
-        """借用语义：只归还，不真关（共享客户端由池统一管理）。"""
-        return None
+        """归还引用，不关闭同一客户端上可能还在使用的其它 SSE 流。"""
+        self._release()
 
 
 def _timeout_key(tmo) -> tuple:  # noqa: ANN001
@@ -624,29 +655,77 @@ def _build_client(tmo, proxy: str | None):  # noqa: ANN001, ANN202
 
 
 async def close_clients() -> None:
-    """关掉池里所有客户端（应用退出时调用；幂等）。"""
+    """退出服务时关闭池，同时取消空闲回收任务。"""
+    loop = asyncio.get_running_loop()
+    sweeper = _CLIENT_SWEEPERS.pop(loop, None)
+    if sweeper is not None and sweeper is not asyncio.current_task():
+        sweeper.cancel()
     clients = [entry[1] for entry in _CLIENTS.values()]
     _CLIENTS.clear()
     for client in clients:
         try:
             await client.aclose()
-        except Exception:  # noqa: BLE001 —— 退出路径上的清理失败不该再抛
+        except Exception:  # noqa: BLE001
             continue
+
+
+async def reap_idle_http_clients(idle_seconds: float | None = None) -> int:
+    """仅关闭当前事件循环中已归还且空闲过期的客户端，不打断在途 SSE。"""
+    loop = asyncio.get_running_loop()
+    now = time.monotonic()
+    idle = _CLIENT_IDLE_SECONDS if idle_seconds is None else max(0.0, idle_seconds)
+    old = []
+    for key, entry in tuple(_CLIENTS.items()):
+        owner, client = entry
+        leases, last_use = _activity(client)
+        if owner is loop and not leases and now - last_use >= idle:
+            if _CLIENTS.get(key) is entry:
+                del _CLIENTS[key]
+                old.append(client)
+    for client in old:
+        try:
+            await client.aclose()
+        except Exception:  # noqa: BLE001
+            pass
+    return len(old)
+
+
+async def _sweep_idle_http_clients() -> None:
+    """有连接池才有定时任务；所有客户端回收后，回收器自行退出。"""
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            await asyncio.sleep(_CLIENT_SWEEP_INTERVAL)
+            await reap_idle_http_clients()
+            if not any(owner is loop for owner, _ in _CLIENTS.values()):
+                return
+    finally:
+        if _CLIENT_SWEEPERS.get(loop) is asyncio.current_task():
+            _CLIENT_SWEEPERS.pop(loop, None)
+
+
+def _start_client_sweeper(loop) -> None:  # noqa: ANN001
+    task = _CLIENT_SWEEPERS.get(loop)
+    if task is None or task.done():
+        _CLIENT_SWEEPERS[loop] = loop.create_task(_sweep_idle_http_clients())
 
 
 def _evict(loop) -> None:  # noqa: ANN001
-    """池满了淘汰最早的一个（按插入顺序）。"""
+    """容量满时只淘汰已归还的连接，绝不关闭正在传输 SSE 的客户端。"""
     while len(_CLIENTS) > _CLIENTS_MAX:
-        key = next(iter(_CLIENTS))
-        entry = _CLIENTS.pop(key, None)
-        if not entry or entry[1].is_closed:
-            continue
-        old_loop, client = entry
-        try:
-            if old_loop is loop:
-                loop.create_task(client.aclose())      # 同一循环才能安全关闭
-        except Exception:  # noqa: BLE001
-            continue
+        victim = next(
+            ((key, entry) for key, entry in _CLIENTS.items()
+             if entry[0] is loop and not _activity(entry[1])[0]),
+            None,
+        )
+        if victim is None:
+            # 全部仍在使用：允许暂时超过 24 组，归还后/下一次借出时再清理。
+            break
+        key, entry = victim
+        if _CLIENTS.get(key) is entry:
+            del _CLIENTS[key]
+            if not entry[1].is_closed:
+                loop.create_task(entry[1].aclose())
 
 
 def stored_http_proxy() -> str:
@@ -708,8 +787,11 @@ def http_client(timeout, *, connect: float | None = None, proxy: str | None = No
     key = (*_timeout_key(tmo), selected_proxy or '', lane)
     entry = _CLIENTS.get(key)
     if entry is not None and entry[0] is loop and not entry[1].is_closed:
+        _start_client_sweeper(loop)
         return _BorrowedClient(entry[1])
     client = _build_client(tmo, selected_proxy)
     _CLIENTS[key] = (loop, client)
+    borrowed = _BorrowedClient(client)
     _evict(loop)
-    return _BorrowedClient(client)
+    _start_client_sweeper(loop)
+    return borrowed
