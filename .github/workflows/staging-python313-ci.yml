@@ -27,8 +27,8 @@ jobs:
           python -m venv .venv
           .venv/bin/python -m pip install --disable-pip-version-check -r server/requirements.txt
 
-      - name: Full Manager regression suite in Python 3.13 venv
-        run: .venv/bin/python -m unittest discover -s server/tests -t .
+      - name: Verify CF Access crypto dependencies import
+        run: .venv/bin/python -c "import jwt, cryptography; from jwt.algorithms import RSAAlgorithm"
 
       - name: Recheck previously failing contracts under root plus venv
         run: |
@@ -39,3 +39,6 @@ jobs:
             server.tests.test_update_e2e.UpdateEndToEndTest.test_pip_uses_user_install_when_system_site_readonly \
             server.tests.test_update_e2e.UpdateEndToEndTest.test_pip_falls_back_to_user_on_permission_error \
             server.tests.test_windows_scripts.GitAttributesTest.test_ps1_files_have_utf8_bom
+
+      - name: Full Manager regression suite in Python 3.13 venv
+        run: .venv/bin/python -m unittest discover -s server/tests -t .
