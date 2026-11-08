@@ -68,3 +68,22 @@ manager.db、users.json、wb2api config.json、auths/、data/state.json 都属�
     sudo systemctl daemon-reload
 
 在维护窗口逐一重启对应服务。如果启用了全局 journald 示例，需要单独移除它并重启 systemd-journald。回滚不更改网关 Key、域名、Workers、SQLite 或前端文件。
+
+
+## 整机进一步优化与验收
+
+1. 每次压测或迁移前后运行以下只读采样器。它不显示进程启动参数、环境变量、Key 或日志正文：
+
+       sh tools/check_host_resources.sh workbuddy-web workbuddy2api cloudflared minecraft
+
+   如果 Manager 的实际 unit 是 workbuddy-manager，替换对应参数。针对 Minecraft/Chromium 多进程，请重点看 systemd MemoryCurrent 和 cgroup oom_kill，而不仅是 MainPID 的 RSS。当前实测的 Manager 和 Go 空闲进程数据只来自无凭据的 CI 隔离环境，不代表生产账号池的整体占用。
+
+2. Go drop-in 另提供 GOMEMLIMIT=144MiB。它是 Go runtime 的**软内存目标**，并非 RSS 硬上限。不能从这个值推断工作集上限；Go 的堆外、网络缓冲与服务其他资源仍可能使实际 RSS 更高。先测纯转发每流 token/s、CPU、延迟和 1M 上下文；若 GC 过于频繁导致延迟退化，可仅去掉该环境变量而保持其它 systemd 资源规则。
+
+3. Manager drop-in 提供 MALLOC_ARENA_MAX=2，目标是降低大请求结束后的 glibc malloc arena 碎片保留，不保证影响 CPython 自己的全部小对象分配。对冷启动 RSS 可能没有可见影响。
+
+4. 可选的 minecraft.service.d/50-minecraft-priority.conf 示例保护 Minecraft 常用内存并提高 CPU/IO 相对权重，**不会更改原有 Java 堆参数**。仅在实际服务名确认后手动安装；不要直接设置 MemoryMin（硬保护可能把全局 OOM 推给其它服务）。MemoryLow 保护也不能凭空创造内存。
+
+5. Chromium 要在使用结束后退出**整个进程树**，而不只是主 PID。若已有自动关闭逻辑，不要另建定时任务；在真实 VPS 中确认 scope 的 memory.current 接近 0。不要在内存不足时同时压测 Chromium、Minecraft 满堆和大上下文。
+
+6. SQLite 可选变量 WB_REQUEST_LOG_RETAIN_DAYS=14（允许 7–365 天，默认 90 天不变），缩短 request_logs 和账号匹配明细的保留期。**注意这不是无损压缩**：usage_daily 与 Key 已用额度等汇总数据不因此清零，但较早的逐笔明细会被永久删除，原始逐笔日志重建能力随之缩短。启用前先完成加密备份，且确认管理界面只需要更短的明细窗口；绝不在未确认时自动开启。
