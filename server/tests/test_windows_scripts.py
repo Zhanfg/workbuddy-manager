@@ -139,7 +139,8 @@ class GitAttributesTest(unittest.TestCase):
         offenders = []
         for path in _ROOT.rglob('*.ps1'):
             parts = set(path.parts)
-            if parts & {'.git', 'node_modules', '.next', '.tools', '.runtime', 'dist'}:
+            if parts & {'.git', 'node_modules', '.next', '.tools', '.runtime',
+                         'dist', '.venv', 'venv', 'env', '.env'}:
                 continue
             if not path.read_bytes().startswith(bytes([0xEF, 0xBB, 0xBF])):
                 offenders.append(str(path.relative_to(_ROOT)))
