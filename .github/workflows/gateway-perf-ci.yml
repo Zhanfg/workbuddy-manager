@@ -44,7 +44,10 @@ jobs:
             server.tests.test_key_usage \
             server.tests.test_stream_error_logging
 
+      - name: Synthetic 340-frame SSE parser CPU benchmark
+        run: python tools/bench_sse_parser.py --frames 340 --loops 300
+
       - name: Compile all Python backend modules
         run: |
           python -m compileall -q server
-          python -m py_compile tools/bench_gateway_sse.py
+          python -m py_compile tools/bench_gateway_sse.py tools/bench_sse_parser.py
