@@ -37,6 +37,7 @@ jobs:
         run: |
           python -m unittest -v \
             server.tests.test_gateway_memory_fastpath \
+            server.tests.test_bench_gateway_sse \
             server.tests.test_gateway_body_limit \
             server.tests.test_responses_api \
             server.tests.test_http_client_pool \
@@ -44,4 +45,6 @@ jobs:
             server.tests.test_stream_error_logging
 
       - name: Compile all Python backend modules
-        run: python -m compileall -q server
+        run: |
+          python -m compileall -q server
+          python -m py_compile tools/bench_gateway_sse.py
